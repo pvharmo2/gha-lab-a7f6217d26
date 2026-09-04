@@ -1,0 +1,83 @@
+name: 'Lint Pull Request'
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - synchronize
+
+jobs:
+  main:
+    timeout-minutes: 20
+    name: Validate Pull Request Title
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # see: https://github.com/commitizen/conventional-commit-types
+          types: |
+            build
+            chore
+            ci
+            docs
+            feat
+            fix
+            perf
+            refactor
+            release
+            revert
+            style
+            test
+          requireScope: false
+          ignoreLabels: |
+            bot
+            ignore-semantic-pull-request
+          # For work-in-progress PRs you can typically use draft pull requests
+          # from GitHub. However, private repositories on the free plan don't have
+          # this option and therefore this action allows you to opt-in to using the
+          # special "[WIP]" prefix to indicate this state. This will avoid the
+          # validation of the PR title and the pull request checks remain pending.
+          # Note that a second check will be reported if this is enabled.
+          wip: true
+
+  check-breaking-change:
+    timeout-minutes: 20
+    name: Validate Breaking Change Marker
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check for breaking change marker on non-release types
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Breaking change markers (!) should only be used with types that trigger releases.
+          # Using ! with types like ci, chore, docs, etc. is ambiguous since those types
+          # don't trigger version bumps. This check prevents confusion in the git history.
+          #
+          # Allowed types for breaking changes: feat, fix, perf
+          # These are the only types that trigger releases via release-please.
+
+          ALLOWED_BREAKING_TYPES="feat|fix|perf"
+
+          # Match patterns like "type!:" or "type(scope)!:" or "type!:(scope)"
+          if [[ "$PR_TITLE" =~ ^([a-z]+)!(\(.+\))?:|^([a-z]+)(\(.+\))?!: ]]; then
+            TYPE="${BASH_REMATCH[1]:-${BASH_REMATCH[3]}}"
+
+            if [[ ! "$TYPE" =~ ^($ALLOWED_BREAKING_TYPES)$ ]]; then
+              echo "::error::Breaking change marker (!) cannot be used with '$TYPE' prefix."
+              echo ""
+              echo "The '!' marker indicates a BREAKING CHANGE and triggers a major version bump."
+              echo "However, '$TYPE' commits don't trigger releases, making the marker ambiguous."
+              echo ""
+              echo "Please either:"
+              echo "  - Use 'feat!:', 'fix!:', or 'perf!:' if this IS a breaking change"
+              echo "  - Remove the '!' if this is NOT a breaking change"
+              echo ""
+              echo "Current PR title: $PR_TITLE"
+              exit 1
+            fi
+          fi
+
+          echo "✅ PR title is valid."

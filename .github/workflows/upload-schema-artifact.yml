@@ -1,0 +1,74 @@
+name: Upload Schema Artifact
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to upload schema to (e.g., v2.6.0)'
+        required: true
+        type: string
+
+jobs:
+  run:
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    name: Generate and Upload WPGraphQL Schema Artifact
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # When manually triggered, checkout the specified tag
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Setup PHP w/ Composer & WP-CLI
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2
+        with:
+          php-version: 8.2
+          extensions: mbstring, intl, bcmath, exif, gd, mysqli, opcache, zip, pdo_mysql
+          coverage: none
+          tools: composer:v2
+
+      - name: Install Composer dependencies
+        uses: ramsey/composer-install@3cf229dc2919194e9e36783941438d17239e8520 # v3.1.1
+        with:
+          working-directory: plugins/wp-graphql
+
+      - name: Setup Node
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          cache: 'npm'
+          node-version-file: '.nvmrc'
+
+      - name: Install NPM dependencies
+        run: npm ci
+
+      - name: Cache Docker images
+        uses: ScribeMD/docker-cache@fb28c93772363301b8d0a6072ce850224b73f74e # 0.5.0
+        with:
+          key: docker-${{ runner.os }}-wp-latest
+
+      - name: Start wp-env
+        run: npm run wp-env start
+
+      - name: Generate the Static Schema
+        run: |
+          npm run wp-env run cli -- wp graphql generate-static-schema --output=/var/www/html/schema.graphql
+          # Copy schema out of container using docker cp
+          echo "Available containers:"
+          docker ps --format '{{.Names}}'
+          # Find the WordPress cli container (contains 'cli' but not 'tests')
+          CONTAINER_ID=$(docker ps --format '{{.Names}}' | grep 'cli' | grep -v 'tests' | head -1)
+          echo "Using container: $CONTAINER_ID"
+          docker cp "$CONTAINER_ID:/var/www/html/schema.graphql" /tmp/schema.graphql
+          echo "Schema generated: $(wc -l < /tmp/schema.graphql) lines"
+
+      - name: Upload schema as release artifact
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
+        with:
+          tag_name: ${{ inputs.tag || github.event.release.tag_name }}
+          files: /tmp/schema.graphql
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

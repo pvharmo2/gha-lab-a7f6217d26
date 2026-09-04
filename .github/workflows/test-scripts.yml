@@ -1,0 +1,54 @@
+# ===========================================
+# TEST RELEASE SCRIPTS WORKFLOW
+# ===========================================
+#
+# This workflow tests the monorepo release scripts to ensure they work correctly.
+# It runs:
+# - On push/PR when scripts/ directory changes
+# - Monthly to catch any environment-related issues
+# - Manually via workflow_dispatch
+#
+# ===========================================
+
+name: Test Release Scripts
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/test-scripts.yml'
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/test-scripts.yml'
+  workflow_dispatch:
+
+jobs:
+  test-scripts:
+    timeout-minutes: 20
+    name: Test Release Scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
+        with:
+          node-version: '22'
+
+      - name: Run script tests
+        run: npm run test:scripts
+
+      - name: Test script CLI help
+        run: |
+          echo "Testing update-upgrade-notice.js --help behavior..."
+          # Script should exit with error if no version provided
+          if node scripts/update-upgrade-notice.js 2>&1 | grep -q "version is required"; then
+            echo "✅ Script correctly requires --version argument"
+          else
+            echo "❌ Script should require --version argument"
+            exit 1
+          fi
